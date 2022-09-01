@@ -7,7 +7,11 @@
 
 package rtc
 
-import "time"
+import (
+	"context"
+	"github.com/qbox/livekit/biz/model"
+	"time"
+)
 
 type Service interface {
 	GetRoomToken(userId, roomId string) string
@@ -25,6 +29,8 @@ type Service interface {
 	ListUser(roomId string) (res []string, err error)
 
 	Online(userId, roomId string) bool
+
+	GetStreamHistory(ctx context.Context, roomId string, start, end int64) ([]model.StreamHistoryItem, error)
 }
 
 type Config struct {
@@ -41,6 +47,7 @@ type Config struct {
 	RtmpPlayUrl      string `mapstructure:"rtmp_play_url"`
 	FlvPlayUrl       string `mapstructure:"flv_play_url"`
 	HlsPlayUrl       string `mapstructure:"hls_play_url"`
+	MediaUrl         string `mapstructure:"media_url"`
 	SecurityType     string `mapstructure:"security_type"`    //expiry, expiry_sk, none
 	PublishKey       string `mapstructure:"publish_key"`      //推流key
 	PublishExpireS   int64  `mapstructure:"publish_expire_s"` //推流URL 过期时间，单位：秒

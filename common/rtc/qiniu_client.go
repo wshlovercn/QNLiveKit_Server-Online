@@ -8,11 +8,15 @@
 package rtc
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/qbox/livekit/biz/model"
+	"github.com/qbox/livekit/utils/logger"
+	"github.com/qbox/livekit/utils/rpc"
 	"net/http"
 	"time"
 
@@ -33,16 +37,18 @@ type QiniuClient struct {
 	RtmpPlayUrl      string
 	FlvPlayUrl       string
 	HlsPlayUrl       string
+	MediaUrl         string
 	AppId            string
 	Ak               string
 	Sk               string
 	securityType     string //expiry, expiry_sk, none
 	publishKey       string // 七牛RTC生成推流地址需要验算公共Key
 	publishExpireS   int64  // 推流地址过期时间，秒
-	client           *http.Client
+	client           *rpc.Client
 }
 
 const RtcHost = "https://rtc.qiniuapi.com"
+const PiliHost = "https://pili.qiniuapi.com"
 
 func NewQiniuClient(conf Config) *QiniuClient {
 	mac := &qiniumac.Mac{
@@ -64,14 +70,19 @@ func NewQiniuClient(conf Config) *QiniuClient {
 		RtmpPlayUrl:      conf.RtmpPlayUrl,
 		FlvPlayUrl:       conf.FlvPlayUrl,
 		HlsPlayUrl:       conf.HlsPlayUrl,
-		client: &http.Client{
+		MediaUrl:         conf.MediaUrl,
+		securityType:     conf.SecurityType,
+		publishKey:       conf.PublishKey,
+		publishExpireS:   conf.PublishExpireS,
+	}
+
+	rpcClient := rpc.Client{
+		Client: &http.Client{
 			Transport: tr,
 			Timeout:   3 * time.Second,
 		},
-		securityType:   conf.SecurityType,
-		publishKey:     conf.PublishKey,
-		publishExpireS: conf.PublishExpireS,
 	}
+	c.client = &rpcClient
 	return c
 }
 
@@ -199,3 +210,90 @@ func (c *QiniuClient) Online(userId, roomId string) bool {
 		return false
 	}
 }
+
+type PiliStreamHistoryResponse struct {
+	Items []PiliStreamHistoryItem `json:"items"`
+}
+
+type PiliStreamHistoryItem struct {
+	Start    int64  `json:"start"`
+	End      int64  `json:"end"`
+	ClientIP string `json:"clientIP"`
+	ServerIP string `json:"serverIP"`
+}
+
+const historyPathFmt = "/v2/hubs/%s/streams/%s/historyactivity?start=%d&end=%d"
+
+func (c *QiniuClient) GetStreamHistory(ctx context.Context, roomId string, start, end int64) ([]model.StreamHistoryItem, error) {
+	log := logger.ReqLogger(ctx)
+	title := c.streamName(roomId)
+	title = base64.URLEncoding.EncodeToString([]byte(title))
+
+	path := fmt.Sprintf(historyPathFmt, c.Hub, title, start, end)
+	url := PiliHost + path
+
+	resp := PiliStreamHistoryResponse{}
+	err := c.client.GetCall(log, &resp, url)
+	if err != nil {
+		log.Errorf("get stream history error %s", err.Error())
+		return nil, err
+	}
+
+	ret := make([]model.StreamHistoryItem, 0, len(resp.Items))
+	if len(resp.Items) > 0 {
+		for _, item := range resp.Items {
+			//mediaUrl, _ := c.playbackUrl(ctx, title, item)
+			ret = append(ret, model.StreamHistoryItem{
+				Start:    item.Start,
+				End:      item.End,
+				ClientIP: item.ClientIP,
+				ServerIP: item.ServerIP,
+				//MediaUrl: mediaUrl,
+			})
+		}
+	}
+
+	return ret, nil
+}
+
+//const playbackPathFmt = "/v2/hubs/%s/streams/%s/playbackurl"
+//
+//type PlaybackUrlRequest struct {
+//	Start      int64 `json:"start"`
+//	End        int64 `json:"end"`
+//	ExpireTime int64 `json:"expireTime"` //过期时间
+//}
+//
+//type PlaybackUrlResponse struct {
+//	Url string `json:"url"`
+//}
+
+//func (c *QiniuClient) playbackUrl(ctx context.Context, title string, item PiliStreamHistoryItem) (string, error) {
+//	log := logger.ReqLogger(ctx)
+//
+//	path := fmt.Sprintf(playbackPathFmt, c.Hub, title)
+//	url := PiliHost + path
+//
+//	req := PlaybackUrlRequest{
+//		Start:      item.Start,
+//		End:        item.End,
+//		ExpireTime: 3600,
+//	}
+//
+//	resp := PlaybackUrlResponse{}
+//
+//	err := c.client.CallWithJSON(log, &resp, url, req)
+//	if err != nil {
+//		log.Errorf("generate playback url error %s", err.Error())
+//		return "", err
+//	}
+//
+//	return resp.Url, nil
+//}
+
+//const mediaPathFmt = "/%s/%s.m3u8?start=%d&end=%d"
+//
+//func (c *QiniuClient) mediaUrl(title string, item PiliStreamHistoryItem) string {
+//	mediaPath := fmt.Sprintf(mediaPathFmt, c.Hub, title, item.Start, item.End)
+//	return c.MediaUrl + mediaPath
+//}

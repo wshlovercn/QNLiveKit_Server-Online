@@ -12,8 +12,10 @@ import (
 	"github.com/qbox/livekit/biz/user"
 	"github.com/qbox/livekit/common/api"
 	"github.com/qbox/livekit/common/auth/liveauth"
+	"github.com/qbox/livekit/common/rtc"
 	"github.com/qbox/livekit/utils/logger"
 	"net/http"
+	"time"
 )
 
 func RegisterCensorRoutes(group *gin.RouterGroup) {
@@ -21,6 +23,7 @@ func RegisterCensorRoutes(group *gin.RouterGroup) {
 	censorGroup.POST("/config", censorController.UpdateCensorConfig)
 	censorGroup.GET("/config", censorController.GetCensorConfig)
 	censorGroup.POST("/stoplive/:liveId", censorController.PostStopLive)
+	censorGroup.POST("/stream/:liveId", censorController.GetLiveStreamHistory)
 }
 
 var censorController = &CensorController{}
@@ -173,4 +176,49 @@ func (c *CensorController) PostStopLive(ctx *gin.Context) {
 type LiveNotifyItem struct {
 	LiveId  string `json:"live_id"`
 	Message string `json:"message"`
+}
+
+type GetLiveStreamHistoryResponse struct {
+	api.Response
+	Data []model.StreamHistoryItem `json:"data"`
+}
+
+func (c *CensorController) GetLiveStreamHistory(ctx *gin.Context) {
+	log := logger.ReqLogger(ctx)
+	liveId := ctx.Param("liveId")
+
+	if liveId == "" {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, api.ErrorWithRequestId(log.ReqID(), api.ErrInvalidArgument))
+		return
+	}
+
+	//liveEntity, err := live.GetService().LiveInfo(ctx, liveId)
+	//if err != nil {
+	//	log.Errorf("find live error %s", err.Error())
+	//	ctx.AbortWithStatusJSON(http.StatusInternalServerError, api.ErrorWithRequestId(log.ReqID(), err))
+	//	return
+	//}
+	//
+	//var start, end int64
+	//if liveEntity.Status == model.LiveStatusOff {
+	//	start = liveEntity.CreatedAt.Unix()
+	//	end = liveEntity.EndAt.Unix()
+	//} else {
+	//	start = liveEntity.CreatedAt.Unix()
+	//	end = time.Now().Unix()
+	//}
+	start := time.Now().AddDate(0, 0, -7).Unix()
+	end := time.Now().Unix()
+
+	items, err := rtc.GetService().GetStreamHistory(ctx, liveId, start, end)
+	if err != nil {
+		log.Errorf("find live error %s", err.Error())
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, api.ErrorWithRequestId(log.ReqID(), err))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, GetLiveStreamHistoryResponse{
+		Response: api.Response{Code: 0, RequestId: log.ReqID()},
+		Data:     items,
+	})
 }
