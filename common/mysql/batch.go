@@ -25,6 +25,7 @@ func BatchInsert(db *gorm.DB, objArr []interface{}) (int64, error) {
 		if (mainFields[i].IsPrimaryKey && mainFields[i].IsBlank) || (mainFields[i].IsIgnored) {
 			continue
 		}
+
 		quoted = append(quoted, mainScope.Quote(mainFields[i].DBName))
 	}
 
